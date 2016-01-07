@@ -1,0 +1,194 @@
+# -------------------------------------------------
+# QGroundControl - Micro Air Vehicle Groundstation
+# Please see our website at <http://qgroundcontrol.org>
+# Maintainer:
+# Lorenz Meier <lm@inf.ethz.ch>
+# (c) 2009-2014 QGroundControl Developers
+# This file is part of the open groundstation project
+# QGroundControl is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# QGroundControl is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+# You should have received a copy of the GNU General Public License
+# along with QGroundControl. If not, see <http://www.gnu.org/licenses/>.
+# -------------------------------------------------
+
+#
+# This file contains configuration settings which are common to both the QGC Application and
+# the Location Plugin. It should mainly contains intial CONFIG tag setup and compiler settings.
+#
+
+# Setup our supported build types. We do this once here and then use the defined config scopes
+# to allow us to easily modify suported build types in one place instead of duplicated throughout
+# the project file.
+
+linux {
+    linux-g++ | linux-g++-64 {
+        message("Linux build")
+        CONFIG += LinuxBuild
+        DEFINES += __STDC_LIMIT_MACROS
+    } else : android-g++ {
+        message("Android build")
+        CONFIG += AndroidBuild MobileBuild
+        DEFINES += __android__
+        DEFINES += __STDC_LIMIT_MACROS
+        DEFINES += QGC_ENABLE_BLUETOOTH
+        target.path = $$DESTDIR
+    } else {
+        error("Unsuported Linux toolchain, only GCC 32- or 64-bit is supported")
+    }
+} else : win32 {
+    win32-msvc2010 | win32-msvc2012 | win32-msvc2013 {
+        message("Windows build")
+        CONFIG += WindowsBuild
+        DEFINES += __STDC_LIMIT_MACROS
+    } else {
+        error("Unsupported Windows toolchain, only Visual Studio 2010, 2012, and 2013 are supported")
+    }
+} else : macx {
+    macx-clang | macx-llvm {
+        message("Mac build")
+        CONFIG += MacBuild
+        DEFINES += __macos__
+        CONFIG += x86_64
+        CONFIG -= x86
+        QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.6
+        QMAKE_MAC_SDK = macosx10.11
+        QMAKE_CXXFLAGS += -fvisibility=hidden
+    } else {
+        error("Unsupported Mac toolchain, only 64-bit LLVM+clang is supported")
+    }
+} else : ios {
+    !equals(QT_MAJOR_VERSION, 5) | !greaterThan(QT_MINOR_VERSION, 4) {
+        error("Unsupported Qt version, 5.5.x or greater is required for iOS")
+    }
+    message("iOS build")
+    CONFIG += iOSBuild MobileBuild app_bundle
+    DEFINES += __ios__
+    QMAKE_IOS_DEPLOYMENT_TARGET = 8.0
+    QMAKE_IOS_TARGETED_DEVICE_FAMILY = 2 #- iPad only for now
+    QMAKE_LFLAGS += -Wl,-no_pie
+    warning("iOS build is experimental and not yet fully functional")
+} else {
+    error("Unsupported build platform, only Linux, Windows, Android and Mac (Mac OS and iOS) are supported")
+}
+
+MobileBuild {
+    DEFINES += __mobile__
+}
+
+# set the QGC version from git
+
+exists ($$PWD/.git) {
+  GIT_DESCRIBE = $$system(git --git-dir $$PWD/.git --work-tree $$PWD describe --always --tags)
+  message(QGroundControl version $${GIT_DESCRIBE})
+} else {
+  GIT_DESCRIBE = None
+}
+
+DEFINES += GIT_VERSION=\"\\\"$$GIT_DESCRIBE\\\"\"
+
+# Installer configuration
+
+installer {
+    CONFIG -= debug
+    CONFIG -= debug_and_release
+    CONFIG += release
+    message(Build Installer)
+}
+
+# Setup our supported build flavors
+
+CONFIG(debug, debug|release) {
+    message(Debug flavor)
+    CONFIG += DebugBuild
+} else:CONFIG(release, debug|release) {
+    message(Release flavor)
+    CONFIG += ReleaseBuild
+} else {
+    error(Unsupported build flavor)
+}
+
+# Need to special case Windows debug_and_release since VS Project creation in this case does strange things [QTBUG-40351]
+win32:debug_and_release {
+    CONFIG += WindowsDebugAndRelease
+}
+
+# Setup our build directories
+
+BASEDIR      = $$IN_PWD
+
+!iOSBuild {
+    OBJECTS_DIR  = $${OUT_PWD}/obj
+    MOC_DIR      = $${OUT_PWD}/moc
+    UI_DIR       = $${OUT_PWD}/ui
+    RCC_DIR      = $${OUT_PWD}/rcc
+}
+
+LANGUAGE = C++
+
+LOCATION_PLUGIN_DESTDIR = $${OUT_PWD}/src/QtLocationPlugin
+LOCATION_PLUGIN_NAME    = QGeoServiceProviderFactoryQGC
+
+# Turn off serial port warnings
+DEFINES += _TTY_NOWARN_
+
+#
+# By default warnings as errors are turned off. Even so, in order for a pull request
+# to be accepted you must compile cleanly with warnings as errors turned on the default
+# set of OS builds. See http://www.qgroundcontrol.org/dev/contribute for more details.
+# You can use the WarningsAsErrorsOn CONFIG switch to turn warnings as errors on for your
+# own builds.
+#
+
+MacBuild | LinuxBuild {
+    QMAKE_CXXFLAGS_WARN_ON += -Wall
+    WarningsAsErrorsOn {
+        QMAKE_CXXFLAGS_WARN_ON += -Werror
+    }
+}
+
+WindowsBuild {
+    QMAKE_CXXFLAGS_WARN_ON += /W3 \
+        /wd4996 \   # silence warnings about deprecated strcpy and whatnot
+        /wd4005 \   # silence warnings about macro redefinition
+        /wd4290 \   # ignore exception specifications
+        /Zc:strictStrings-  # work around win 8.1 sdk sapi.h problem
+    WarningsAsErrorsOn {
+        QMAKE_CXXFLAGS_WARN_ON += /WX
+    }
+}
+
+#
+# Build-specific settings
+#
+
+ReleaseBuild {
+    DEFINES += QT_NO_DEBUG
+    WindowsBuild {
+        # Use link time code generation for better optimization (I believe this is supported in MSVC Express, but not 100% sure)
+        QMAKE_LFLAGS_LTCG = /LTCG
+        QMAKE_CFLAGS_LTCG = -GL
+
+        # Turn on debugging information so we can collect good crash dumps from release builds
+        QMAKE_CXXFLAGS_RELEASE += /Zi
+        QMAKE_LFLAGS_RELEASE += /DEBUG
+    }
+}
+
+#
+# Unit Test specific configuration goes here
+#
+# We have to special case Windows debug_and_release builds because you can't have files
+# which are only in the debug variant [QTBUG-40351]. So in this case we include unit tests
+# even in the release variant. If you want a Windows release build with no unit tests run
+# qmake with CONFIG-=debug_and_release CONFIG+=release.
+#
+
+DebugBuild|WindowsDebugAndRelease {
+    DEFINES += UNITTEST_BUILD
+}
